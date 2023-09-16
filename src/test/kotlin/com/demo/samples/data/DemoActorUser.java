@@ -14,10 +14,7 @@ public class DemoActorUser extends Actor {
     @Override
     public void onReceiveMessageWithoutAnyMatch(String sender,
                                                 Object message) {
-        String content = StringUtils233.format("from = {}, my = {}, received message = {}",
-                sender,
-                getActorId(),
-                message);
-        log.info(content);
+        // 未匹配的数据
+        log.error("no match message type. message = {}", message);
     }
 }
