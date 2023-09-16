@@ -2,6 +2,9 @@
 
 Actor 的实现
 
+# JDK version
+JDK 17+
+
 # Introduce
 
 kotlin actor implement, because kotlin have 'coroutine' to use.
