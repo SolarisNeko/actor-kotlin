@@ -207,9 +207,9 @@ abstract class ActorSystem(
     }
 
     /**
-     * 所有发消息的最终入口
+     * 【Core】所有发消息的最终入口
      *
-     * @return isOk
+     * @return isOk | 投递消息失败, 由外层业务自己处理
      */
     private fun _send(senderActorId: String, receiverActorId: String, message: Any): Boolean {
         if (isShutdown.get()) {

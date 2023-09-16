@@ -1,14 +1,15 @@
 package com.demo.actor.core
 
-import com.demo.actor.system.ActorSystem
 import com.demo.actor.message.ActorMessage
 import com.demo.actor.message.ActorSyncMessage
 import com.demo.actor.message.handler.ActorMessageHandler
 import com.demo.actor.message.handler.ActorMessageHandler.Companion.handle
 import com.demo.actor.message.handler.ActorMessageTypeHandler
+import com.demo.actor.system.ActorSystem
 import com.neko233.skilltree.annotation.Nullable
 import com.neko233.skilltree.commons.json.JsonUtils233
 import org.slf4j.LoggerFactory
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.BlockingQueue
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -16,8 +17,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 
 abstract class Actor
-protected constructor(// register to actor-system-java get
-    private val actorId: String
+protected constructor(
+// register to actor-system-java get
+    private val actorId: String,
+    // 最大多少邮箱
+    private val maxMailboxSize: Int = 10000,
 ) {
     protected open var actorSystem: ActorSystem? = null
         get() {
@@ -25,9 +29,13 @@ protected constructor(// register to actor-system-java get
         }
 
     // 邮箱
-    protected val mailbox: BlockingQueue<ActorMessage> = LinkedBlockingQueue()
+    protected val mailbox: BlockingQueue<ActorMessage> = if (maxMailboxSize > 0) {
+        ArrayBlockingQueue(maxMailboxSize)
+    } else {
+        LinkedBlockingQueue()
+    }
 
-    // 消息类型处理器
+    // messageType: Class -> messageHandler
     protected val messageTypeHandlerMap: MutableMap<Class<*>, ActorMessageHandler<*>> = HashMap()
 
     // state
@@ -63,11 +71,15 @@ protected constructor(// register to actor-system-java get
         return mailbox.offer(msg)
     }
 
-    fun <T> registerHandler(actorMessageTypeHandler: ActorMessageTypeHandler<T>): Actor {
-        return registerHandler(actorMessageTypeHandler.getType(), actorMessageTypeHandler)
+    fun <T> registerMessageHandler(actorMessageTypeHandler: ActorMessageTypeHandler<T>): Actor {
+        return registerMessageHandler(actorMessageTypeHandler.getType(), actorMessageTypeHandler)
     }
 
-    fun <T> registerHandler(
+    /**
+     * 注册消息处理器
+     * handle message by message Type
+     */
+    fun <T> registerMessageHandler(
         type: Class<T>?,
         actorMessageTypeHandler: ActorMessageHandler<T>?
     ): Actor {
@@ -77,8 +89,10 @@ protected constructor(// register to actor-system-java get
         if (actorMessageTypeHandler == null) {
             return this
         }
+
         messageTypeHandlerMap.merge(
-            type, actorMessageTypeHandler
+            type,
+            actorMessageTypeHandler
         ) { v1: ActorMessageHandler<*>?, v2: ActorMessageHandler<*> ->
             log.info("typeHandler merge to newHandler. type = {}", type.getName())
             v2

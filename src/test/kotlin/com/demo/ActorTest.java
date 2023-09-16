@@ -38,10 +38,10 @@ public class ActorTest {
 
         // build actor
         final Actor actor1 = new DemoActorUser("actor1")
-                .registerHandler(String.class, (sender, receiver, message) -> {
+                .registerMessageHandler(String.class, (sender, receiver, message) -> {
                     log.info("收到 string msg = {}", message);
                 })
-                .registerHandler(DemoSyncCallbackMessage.class, (sender, receiver, msg) -> {
+                .registerMessageHandler(DemoSyncCallbackMessage.class, (sender, receiver, msg) -> {
                     String request = msg.getRequest();
                     log.info("[sync] 收到 msg = {}", request);
 
