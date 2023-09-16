@@ -23,6 +23,11 @@ protected constructor(
     // 最大多少邮箱
     private val maxMailboxSize: Int = 10000,
 ) {
+
+
+    constructor(actorId: String)
+            : this(actorId, 10000)
+
     protected open var actorSystem: ActorSystem? = null
         get() {
             return field
