@@ -36,9 +36,11 @@
 
 
     <properties>
-        <java.version>8</java.version>
+        <java.version>17</java.version>
+        <jvmTarget.version>17</jvmTarget.version>
         <kotlin.version>1.9.10</kotlin.version>
         <kotlin.coroutine.version>1.6.4</kotlin.coroutine.version>
+        <dokka.version>1.9.0</dokka.version>
 
         <github.global.server>github</github.global.server>
         <maven.compiler.source>1.8</maven.compiler.source>
@@ -187,10 +189,7 @@
                     <args>
                         <arg>-Xjsr305=strict</arg>
                     </args>
-                    <compilerPlugins>
-                        <plugin>spring</plugin>
-                    </compilerPlugins>
-                    <jvmTarget>1.8</jvmTarget>
+                    <jvmTarget>${jvmTarget.version}</jvmTarget>
                 </configuration>
                 <dependencies>
                     <dependency>
@@ -210,7 +209,7 @@
                     </descriptorRefs>
                     <archive>
                         <manifest>
-                            <mainClass></mainClass>
+<!--                            <mainClass></mainClass>-->
                         </manifest>
                     </archive>
                     <appendAssemblyId>false</appendAssemblyId>
@@ -252,22 +251,43 @@
                     </execution>
                 </executions>
             </plugin>
+<!--            <plugin>-->
+<!--                <groupId>org.apache.maven.plugins</groupId>-->
+<!--                <artifactId>maven-javadoc-plugin</artifactId>-->
+<!--                <version>2.10.3</version>-->
+<!--                <executions>-->
+<!--                    <execution>-->
+<!--                        <id>attach-javadocs</id>-->
+<!--                        <goals>-->
+<!--                            <goal>jar</goal>-->
+<!--                        </goals>-->
+<!--                        <configuration>-->
+<!--                            <additionalparam>-Xdoclint:none</additionalparam>-->
+<!--                        </configuration>-->
+<!--                    </execution>-->
+<!--                </executions>-->
+<!--            </plugin>-->
+
+            <!-- kotlin javadoc plugin -->
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-javadoc-plugin</artifactId>
-                <version>2.10.3</version>
+                <groupId>org.jetbrains.dokka</groupId>
+                <artifactId>dokka-maven-plugin</artifactId>
+                <version>${dokka.version}</version> <!-- 请根据最新版本更新 -->
                 <executions>
                     <execution>
-                        <id>attach-javadocs</id>
+                        <id>dokka</id>
+                        <phase>package</phase>
                         <goals>
-                            <goal>jar</goal>
+                            <goal>javadocJar</goal>
                         </goals>
                         <configuration>
-                            <additionalparam>-Xdoclint:none</additionalparam>
+                            <!-- 指定生成的 JavaDoc 输出目录 -->
+                            <outputDir>${project.build.directory}/javadoc</outputDir>
                         </configuration>
                     </execution>
                 </executions>
             </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-gpg-plugin</artifactId>
