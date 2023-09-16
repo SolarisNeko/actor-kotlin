@@ -3,7 +3,7 @@
 Actor 的实现
 
 # JDK version
-JDK 17+
+JDK 8+
 
 # Introduce
 

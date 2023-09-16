@@ -36,14 +36,17 @@
 
 
     <properties>
-        <java.version>17</java.version>
-        <jvmTarget.version>17</jvmTarget.version>
+        <maven.compiler.source>8</maven.compiler.source>
+<!--        <maven.compiler.release>8</maven.compiler.release>-->
+        <java.version>8</java.version>
+        <jvmTarget.version>1.8</jvmTarget.version>
         <kotlin.version>1.9.10</kotlin.version>
         <kotlin.coroutine.version>1.6.4</kotlin.coroutine.version>
         <dokka.version>1.9.0</dokka.version>
 
+        <maven-surefire-plugin.version>3.1.2</maven-surefire-plugin.version>
+
         <github.global.server>github</github.global.server>
-        <maven.compiler.source>1.8</maven.compiler.source>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <gpg.executable>gpg</gpg.executable>
@@ -314,6 +317,15 @@
                     <autoReleaseAfterClose>true</autoReleaseAfterClose>
                 </configuration>
             </plugin>
+
+<!--            <plugin>-->
+<!--                <groupId>org.apache.maven.plugins</groupId>-->
+<!--                <artifactId>maven-surefire-plugin</artifactId>-->
+<!--                <version>${maven-surefire-plugin.version}</version>-->
+<!--                <configuration>-->
+<!--                    <argLine>&#45;&#45;add-opens java.base/java.util=ALL-UNNAMED</argLine>-->
+<!--                </configuration>-->
+<!--            </plugin>-->
 
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
