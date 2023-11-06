@@ -5,7 +5,7 @@
 
     <groupId>com.neko233</groupId>
     <artifactId>actor-kotlin</artifactId>
-    <version>0.0.2</version>
+    <version>0.1.0</version>
 
     <name>actor-kotlin</name>
     <url>https://github.com/SolarisNeko/actor-kotlin/tree/main</url>
