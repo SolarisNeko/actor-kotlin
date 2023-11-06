@@ -410,9 +410,9 @@ protected constructor(
                 message: Any?,
             ) {
                 if (msgTypeIndex == 0) {
-                    method.invoke(self, sender, message)
-                } else {
                     method.invoke(self, message, sender)
+                } else {
+                    method.invoke(self, sender, message)
                 }
             }
 
