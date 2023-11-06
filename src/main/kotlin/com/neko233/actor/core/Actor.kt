@@ -339,6 +339,9 @@ protected constructor(
         return isExecute.compareAndSet(true, false)
     }
 
+    override fun init() {
+    }
+
     override fun shutdown() {
 
     }
@@ -396,6 +399,8 @@ protected constructor(
             messageType = paramType1 as Class<Any>
         }
 
+        val msgTypeIndex = parameterTypes.indexOf(messageType)
+
         // 前两个是 actor
         val self = this
         val handler = object : ActorOnlineMessageTypeHandler<Any> {
@@ -404,7 +409,11 @@ protected constructor(
                 receiver: Actor,
                 message: Any?,
             ) {
-                method.invoke(self, sender, message)
+                if (msgTypeIndex == 0) {
+                    method.invoke(self, sender, message)
+                } else {
+                    method.invoke(self, message, sender)
+                }
             }
 
             override fun getType(): Class<Any> {

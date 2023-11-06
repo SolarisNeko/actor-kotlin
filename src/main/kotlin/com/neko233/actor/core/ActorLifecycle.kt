@@ -8,6 +8,8 @@ package com.neko233.actor.core
  * */
 interface ActorLifecycle {
 
+    fun init()
+
     fun shutdown()
 
 }
