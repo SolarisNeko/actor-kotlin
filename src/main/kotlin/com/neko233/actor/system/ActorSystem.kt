@@ -1,9 +1,10 @@
 package com.neko233.actor.system
 
+import com.alibaba.fastjson2.JSON
 import com.neko233.actor.annotation.NotThreadSafeField
 import com.neko233.actor.core.Actor
 import com.neko233.actor.message.ActorSyncMessage
-import com.neko233.actor.worker.ActorWorkerCenter
+import com.neko233.actor.worker.ActorWorkerCenterApi
 import com.neko233.skilltree.annotation.ThreadSafe
 import com.neko233.skilltree.commons.core.base.MapUtils233
 import com.neko233.skilltree.commons.core.base.StringUtils233
@@ -23,13 +24,13 @@ import java.util.concurrent.atomic.AtomicInteger
 abstract class ActorSystem(
     private val systemName: String,
     // 执行层 | systemName, workerId ->
-    private val actorWorkerCenter: ActorWorkerCenter,
+    private val actorWorkerCenter: ActorWorkerCenterApi,
     private val maxShutdownWaitMs: Long = TimeUnit.SECONDS.toMillis(30),
 ) {
 
     constructor(
         systemName: String,
-        actorWorkerCenter: ActorWorkerCenter,
+        actorWorkerCenter: ActorWorkerCenterApi,
     ) : this(
         systemName,
         actorWorkerCenter,
@@ -40,15 +41,21 @@ abstract class ActorSystem(
     private val isShutdown = AtomicBoolean(false)
 
 
-    // 系统 n 次没有消息可消费
+    /**
+     * 系统 n 次没有消息可消费, 用于暂停系统空检测
+     */
     @ThreadSafe
     private val systemNoMsgDispatchTermCount = AtomicInteger(0)
 
-    // actorId : Actor
+    /**
+     * <actorId, Actor>
+     */
     @NotThreadSafeField
     private val actorIdToActorMap: MutableMap<String, Actor> = ConcurrentHashMap()
 
-    // actorId : 未读消息数
+    /**
+     * actorId : 未读消息数
+     */
     @NotThreadSafeField
     private val actorIdToUnreadMsgCounterMap: MutableMap<String, AtomicInteger> = ConcurrentHashMap()
 
@@ -87,7 +94,7 @@ abstract class ActorSystem(
                         if (actorIdToUnreadMsgCounterMap.isEmpty()) {
                             break
                         }
-                        dispatchActorMessageToCosume()
+                        dispatchMessageToActorConsume()
                     }
 
                     // 没有需要执行的
@@ -111,7 +118,7 @@ abstract class ActorSystem(
                     }
 
                     // @NeedThreadSafe 这部分 | 目前单线程
-                    dispatchActorMessageToCosume()
+                    dispatchMessageToActorConsume()
                 } catch (t: Throwable) {
                     log.error(
                         "[ActorSystem] dispatcher-thread meet unknown-exception. will continue work",
@@ -133,19 +140,25 @@ abstract class ActorSystem(
         )
     }
 
-    private fun dispatchActorMessageToCosume() {
-        for ((receiverActorId, unreadMsgCounter) in actorIdToUnreadMsgCounterMap) {
+    /**
+     * 分发 message 给 Actor 消费(执行)
+     *
+     * ps: 此处 dispatcherThread 改成多线程会有问题
+     */
+    private fun dispatchMessageToActorConsume() {
+        for ((toActorId, unreadMsgCounter) in actorIdToUnreadMsgCounterMap) {
 
             // 消息数
             val messageCount = unreadMsgCounter.get()
             if (messageCount <= 0) {
                 // 删除监听
-                actorIdToUnreadMsgCounterMap.remove(receiverActorId)
+                actorIdToUnreadMsgCounterMap.remove(toActorId)
                 continue
             }
 
             // 收到消息的 actor
-            val receiverActor = actorIdToActorMap[receiverActorId] ?: continue
+            val receiverActor = actorIdToActorMap[toActorId]
+                ?: continue
             val inExecuteState = receiverActor.isInExecuteState
             if (inExecuteState) {
                 continue
@@ -157,13 +170,13 @@ abstract class ActorSystem(
                 continue
             }
 
-            // 未读消息 - 1 ｜ todo 有多线程问题
+            // 未读消息 - 1
             val isConsumeMessageSuccess = unreadMsgCounter.decrementAndGet() >= 0
             if (!isConsumeMessageSuccess) {
                 val consumeMessageCount = unreadMsgCounter.get()
                 log.warn(
                     "actorId 消费未读消息失败. actorId = {}, consumeMessageCount = {}",
-                    receiverActorId,
+                    toActorId,
                     consumeMessageCount
                 )
                 continue
@@ -172,8 +185,11 @@ abstract class ActorSystem(
             // 成功处理
             systemNoMsgDispatchTermCount.set(0)
 
-            // worker. async delegate ActorWorkCenter to execute real business logic
-            actorWorkerCenter.async(receiverActorId) { receiverActor.consumeMessage() }
+            // 线程绑定
+            // worker. async delegate ActorWork to execute real business logic
+            actorWorkerCenter.async(toActorId) {
+                receiverActor.consumeMessage()
+            }
         }
     }
 
@@ -181,13 +197,13 @@ abstract class ActorSystem(
         val actorId = actor.getActorId()
         if (StringUtils.isBlank(actorId)) {
             val exceptionLog = StringUtils233.format(
-                "actorId can not is blank! actorId = \"\${actorId}\"",
+                "actorId can not is blank! actorId = ${actorId}",
                 actorId
             )
             throw IllegalArgumentException(exceptionLog)
         }
         actorIdToActorMap[actorId] = actor
-        actor.registerActorSystem(this)
+        actor.registerToActorSystem(this)
     }
 
     /**
@@ -201,7 +217,7 @@ abstract class ActorSystem(
     fun sendMessageAsync(
         senderActorId: String,
         receiverActorId: String,
-        message: Any
+        message: Any,
     ): Boolean {
         return _send(senderActorId, receiverActorId, message)
     }
@@ -211,29 +227,46 @@ abstract class ActorSystem(
      *
      * @return isOk | 投递消息失败, 由外层业务自己处理
      */
-    private fun _send(senderActorId: String, receiverActorId: String, message: Any): Boolean {
+    private fun _send(
+        fromActorId: String,
+        toActorId: String,
+        message: Any,
+    ): Boolean {
+        // 发送者自己肯定在线的
+        val fromActor = actorIdToActorMap[fromActorId]!!
+
+
+        // 是否关闭
         if (isShutdown.get()) {
             log.warn(
                 "actor-system is shutdown now. so not send message from actorId = {}, to actorId = {}",
-                senderActorId,
-                receiverActorId
+                fromActorId,
+                toActorId
             )
             return false
         }
-        val receiverActor = actorIdToActorMap[receiverActorId]
-        if (receiverActor == null) {
-            log.error("not found actorId = {}", receiverActorId)
-            return false
+
+        // get target actor
+        val toActor = actorIdToActorMap[toActorId]
+        if (toActor == null) {
+            // 对方离线
+            log.debug("target is offline. toActorId={}, message={}", toActorId, JSON.toJSONString(message))
+            // 在对方线程上, 执行这个消息的逻辑
+            actorWorkerCenter.async(toActorId) {
+                fromActor.handleOfflineMessage(toActorId, message)
+            }
+            return true
         }
 
+        // online
         // 发给 receiver 的 mailbox
-        val isSuccess = receiverActor.receiveMessage(senderActorId, message)
+        val isSuccess = toActor.sendMessageToMailBox(fromActorId, message)
         if (!isSuccess) {
             return false
         }
 
         // 记录待处理
-        addMessageCount(receiverActorId)
+        addMessageCount(toActorId)
 
 //        // 响应式
 //        dispatcherSignal.awake(1);
@@ -261,7 +294,7 @@ abstract class ActorSystem(
     fun sendMessageSyncPredatory(
         receiverActorName: String,
         senderActorName: String,
-        message: Any
+        message: Any,
     ): Boolean {
         val actor = actorIdToActorMap[receiverActorName]
         if (actor == null) {
@@ -277,7 +310,7 @@ abstract class ActorSystem(
                     TimeUnit.MILLISECONDS.sleep(50)
                     continue
                 }
-                actor.handleMessageByPipeline(senderActorName, message)
+                actor.executeOnlineMessageHandlerByPipeline(senderActorName, message)
                 break
             } catch (e: Exception) {
                 log.error(
@@ -305,7 +338,7 @@ abstract class ActorSystem(
     fun sendMessageSyncOrderly(
         receiverActorName: String,
         senderActorName: String,
-        message: Any
+        message: Any,
     ): Boolean {
         val actor = actorIdToActorMap[receiverActorName]
         if (actor == null) {
@@ -336,7 +369,7 @@ abstract class ActorSystem(
 
 
     /**
-     * 关闭系统
+     * 关闭系统, 会等待所有消息消耗完毕
      */
     fun shutdown() {
         val isOk = isShutdown.compareAndSet(false, true)
@@ -384,5 +417,7 @@ abstract class ActorSystem(
     private fun isConsumeAllMessage(): Boolean {
         return MapUtils233.isEmpty(actorIdToUnreadMsgCounterMap)
     }
+
+
 }
 

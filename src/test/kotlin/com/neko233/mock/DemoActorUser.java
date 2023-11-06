@@ -1,4 +1,4 @@
-package com.neko233.data;
+package com.neko233.mock;
 
 import com.neko233.actor.core.Actor;
 import lombok.extern.slf4j.Slf4j;

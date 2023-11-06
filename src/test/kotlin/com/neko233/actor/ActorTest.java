@@ -4,10 +4,10 @@ import com.neko233.actor.core.Actor;
 import com.neko233.actor.system.ActorSystem;
 import com.neko233.actor.system.SimpleActorSystem;
 import com.neko233.actor.worker.ActorWorkerCenter;
-import com.neko233.actor.worker.DefaultActorWorkerCenter;
+import com.neko233.actor.worker.ActorWorkerCenterApi;
 import com.neko233.actor.worker.impl.CoroutineActorWorker;
-import com.neko233.data.DemoActorUser;
-import com.neko233.data.DemoSyncCallbackMessage;
+import com.neko233.mock.DemoActorUser;
+import com.neko233.mock.DemoSyncCallbackMessage;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
 import org.junit.Test;
@@ -25,11 +25,13 @@ public class ActorTest {
     @Test
     public void demo() throws InterruptedException {
 
-        ActorWorkerCenter actorWorkerCenter = new DefaultActorWorkerCenter(
+        // worker
+        ActorWorkerCenterApi actorWorkerCenter = new ActorWorkerCenter(
                 "actorWorkerCenter",
                 Runtime.getRuntime().availableProcessors() * 2,
                 CoroutineActorWorker::new
         );
+        // system
         ActorSystem actorSystem = new SimpleActorSystem(
                 "actorSystem",
                 actorWorkerCenter
@@ -38,10 +40,10 @@ public class ActorTest {
 
         // build actor
         final Actor actor1 = new DemoActorUser("actor1")
-                .registerMessageHandler(String.class, (sender, receiver, message) -> {
+                .registerOnlineMessageHandler(String.class, (sender, receiver, message) -> {
                     log.info("收到 string msg = {}", message);
                 })
-                .registerMessageHandler(DemoSyncCallbackMessage.class, (sender, receiver, msg) -> {
+                .registerOnlineMessageHandler(DemoSyncCallbackMessage.class, (sender, receiver, msg) -> {
                     String request = msg.getRequest();
                     log.info("[sync] 收到 msg = {}", request);
 
@@ -82,6 +84,7 @@ public class ActorTest {
                     actor1.send("actor2", "test -- " + count);
                     count++;
 
+                    // 检测协程
 //                    try {
 //                        TimeUnit.SECONDS.sleep(5);
 //                    } catch (InterruptedException e) {

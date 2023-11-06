@@ -2,16 +2,14 @@ package com.neko233.actor.worker.impl
 
 import com.neko233.actor.worker.ActorWorker
 import kotlinx.coroutines.*
-import lombok.extern.slf4j.Slf4j
 import org.slf4j.LoggerFactory
 import java.util.concurrent.atomic.AtomicBoolean
 
 // 知道正在使用不稳定的 API = DelicateCoroutinesApi，并且您愿意接受与之相关的变化。
 @OptIn(DelicateCoroutinesApi::class)
-@Slf4j
 class CoroutineActorWorker(
     centerName: String,
-    id: Int
+    workerId: Int,
 ) : ActorWorker {
 
     // 协程 作用域
@@ -20,15 +18,15 @@ class CoroutineActorWorker(
 
 
     companion object {
-        val log = LoggerFactory.getLogger(this::class.java)
+        private val LOGGER = LoggerFactory.getLogger(CoroutineActorWorker::class.java)!!
     }
 
 
     init {
         val uniqueActorCoroutineDispatcher: ExecutorCoroutineDispatcher =
-            newFixedThreadPoolContext(1, "$centerName-$id-coroutine")
+            newFixedThreadPoolContext(1, "$centerName-$workerId-coroutine")
 
-        val uniqueId = "$centerName-$id"
+        val uniqueId = "$centerName-$workerId"
 
         coroutineScope = CoroutineScope(
             SupervisorJob()
@@ -38,7 +36,7 @@ class CoroutineActorWorker(
 //        coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName(uniqueId))
 
         coroutineScope.launch {
-            log.info("init coroutine-actor-worker done. uniqueId = ${uniqueId}")
+            LOGGER.debug("init coroutine-actor-worker done. uniqueId = ${uniqueId}")
         }
     }
 
@@ -63,12 +61,12 @@ class CoroutineActorWorker(
 
             coroutineScope.cancel()
 
-            log.info("shutdown coroutine")
+            LOGGER.debug("shutdown coroutine")
         }
     }
 
     private fun handleUncaughtException(t: Throwable) {
         // 在这里处理异常，例如记录日志或采取其他措施
-        log.error("uncaught exception", t)
+        LOGGER.error("uncaught exception", t)
     }
 }

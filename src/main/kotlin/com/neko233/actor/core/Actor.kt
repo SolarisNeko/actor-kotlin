@@ -1,14 +1,20 @@
 package com.neko233.actor.core
 
+import com.alibaba.fastjson2.JSON
+import com.neko233.actor.annotation.ActorMethodOffline
+import com.neko233.actor.annotation.ActorMethodOnline
+import com.neko233.actor.annotation.OnOtherActorThread
 import com.neko233.actor.message.ActorMessage
 import com.neko233.actor.message.ActorSyncMessage
-import com.neko233.actor.message.handler.ActorMessageHandler
-import com.neko233.actor.message.handler.ActorMessageHandler.Companion.handle
-import com.neko233.actor.message.handler.ActorMessageTypeHandler
+import com.neko233.actor.message.handler.ActorOfflineMessageHandler
+import com.neko233.actor.message.handler.ActorOnlineMessageHandler
+import com.neko233.actor.message.handler.ActorOnlineMessageHandler.Companion.handle
+import com.neko233.actor.message.handler.ActorOnlineMessageTypeHandler
 import com.neko233.actor.system.ActorSystem
 import com.neko233.skilltree.annotation.Nullable
 import com.neko233.skilltree.commons.json.JsonUtils233
 import org.slf4j.LoggerFactory
+import java.lang.reflect.Method
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.BlockingQueue
 import java.util.concurrent.LinkedBlockingQueue
@@ -18,20 +24,23 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 abstract class Actor
 protected constructor(
-// register to actor-system-java get
+    // 唯一标识 actorId
     private val actorId: String,
-    // 最大多少邮箱
-    private val maxMailboxSize: Int = 10000,
-) {
+    // 邮箱大小
+    private val maxMailboxSize: Int = 16,
+) : ActorLifecycle {
 
 
-    constructor(actorId: String)
-            : this(actorId, 10000)
+    // state
+    private val isExecute = AtomicBoolean(false)
 
-    protected open var actorSystem: ActorSystem? = null
-        get() {
-            return field
-        }
+    // 是否执行中
+    val isInExecuteState: Boolean
+        /**
+         * @return 是否在执行中?
+         */
+        get() = isExecute.get()
+
 
     // 邮箱
     protected val mailbox: BlockingQueue<ActorMessage> = if (maxMailboxSize > 0) {
@@ -39,17 +48,31 @@ protected constructor(
     } else {
         LinkedBlockingQueue()
     }
+    protected open var actorSystem: ActorSystem? = null
+        get() {
+            return field
+        }
+
 
     // messageType: Class -> messageHandler
-    protected val messageTypeHandlerMap: MutableMap<Class<*>, ActorMessageHandler<*>> = HashMap()
-
-    // state
-    private val isExecute = AtomicBoolean(false)
+    protected val onlineMsgTypeHandlerMap: MutableMap<Class<*>, ActorOnlineMessageHandler<*>> = HashMap()
+    protected val offlineMsgTypeHandlerMap: MutableMap<Class<*>, ActorOfflineMessageHandler<*>> = HashMap()
 
 
     companion object {
-        val log = LoggerFactory.getLogger(this::class.java)!!
+        val LOGGER = LoggerFactory.getLogger(Actor::class.java)!!
+    }
 
+    /**
+     * default mailbox size
+     */
+    constructor(actorId: String)
+            : this(actorId, 16)
+
+
+    init {
+        // 注册自己的注解方法
+        this.registerActorHandlerOnlineByAnnotation()
     }
 
     fun getActorId(): String {
@@ -57,7 +80,7 @@ protected constructor(
     }
 
     // actor system invoke
-    fun registerActorSystem(actorSystem: ActorSystem?) {
+    fun registerToActorSystem(actorSystem: ActorSystem?) {
         this.actorSystem = actorSystem
     }
 
@@ -68,25 +91,25 @@ protected constructor(
      * @param message 消息
      * @return 是否接收成功
      */
-    fun receiveMessage(
+    fun sendMessageToMailBox(
         sender: String?,
-        message: Any?
+        message: Any?,
     ): Boolean {
         val msg = ActorMessage.createNew(sender, message)
         return mailbox.offer(msg)
     }
 
-    fun <T> registerMessageHandler(actorMessageTypeHandler: ActorMessageTypeHandler<T>): Actor {
-        return registerMessageHandler(actorMessageTypeHandler.getType(), actorMessageTypeHandler)
+    fun <T> registerOnlineMessageHandler(actorMessageTypeHandler: ActorOnlineMessageTypeHandler<T>): Actor {
+        return registerOnlineMessageHandler(actorMessageTypeHandler.getType(), actorMessageTypeHandler)
     }
 
     /**
      * 注册消息处理器
      * handle message by message Type
      */
-    fun <T> registerMessageHandler(
+    fun <T> registerOnlineMessageHandler(
         type: Class<T>?,
-        actorMessageTypeHandler: ActorMessageHandler<T>?
+        actorMessageTypeHandler: ActorOnlineMessageHandler<T>?,
     ): Actor {
         if (type == null) {
             return this
@@ -95,11 +118,35 @@ protected constructor(
             return this
         }
 
-        messageTypeHandlerMap.merge(
+        onlineMsgTypeHandlerMap.merge(
             type,
             actorMessageTypeHandler
-        ) { v1: ActorMessageHandler<*>?, v2: ActorMessageHandler<*> ->
-            log.info("typeHandler merge to newHandler. type = {}", type.getName())
+        ) { v1: ActorOnlineMessageHandler<*>?, v2: ActorOnlineMessageHandler<*> ->
+            LOGGER.info("typeHandler merge to newHandler. type = {}", type.getName())
+            v2
+        }
+        return this
+    }
+
+    /**
+     * 离线消息处理器
+     */
+    fun <T> registerOfflineMessageHandler(
+        type: Class<T>?,
+        actorMessageTypeHandler: ActorOfflineMessageHandler<T>?,
+    ): Actor {
+        if (type == null) {
+            return this
+        }
+        if (actorMessageTypeHandler == null) {
+            return this
+        }
+
+        offlineMsgTypeHandlerMap.merge(
+            type,
+            actorMessageTypeHandler
+        ) { v1, v2 ->
+            LOGGER.info("typeHandler merge to newHandler. type = {}", type.getName())
             v2
         }
         return this
@@ -108,16 +155,21 @@ protected constructor(
     /**
      * 处理消息
      *
-     * @param senderActorId 发送者的 actorId
+     * @param fromActorId 发送者的 actorId
      * @param message       消息
      */
-    fun handleMessageByPipeline(
-        senderActorId: String,
-        message: Any
+    fun executeOnlineMessageHandlerByPipeline(
+        fromActorId: String,
+        message: Any,
     ) {
-        val sender = getActorById(senderActorId)
+        val sender = getActorById(fromActorId)
         if (sender == null) {
-            log.error("senderActorId = {} not found", senderActorId)
+            LOGGER.error(
+                "sender not found. fromActorId={}, toActorId={}, data={}",
+                fromActorId,
+                this.actorId,
+                JSON.toJSONString(message)
+            )
             return
         }
 
@@ -126,7 +178,9 @@ protected constructor(
             // sync start
             val syncMessage = message
             val data = syncMessage.message
-            handleMessageAsync(sender, data)
+
+            // 异步后等待
+            this.handleMessageAsync(sender, data)
 
             // sync done
             syncMessage.finish()
@@ -134,7 +188,7 @@ protected constructor(
         }
 
         // default = async message
-        handleMessageAsync(sender, message)
+        this.handleMessageAsync(sender, message)
         return
     }
 
@@ -146,17 +200,17 @@ protected constructor(
      */
     private fun handleMessageAsync(
         sender: Actor,
-        message: Any
+        message: Any,
     ) {
         val type: Class<*> = message.javaClass
 
         // message type to handler
-        val actorMessageTypeHandler = messageTypeHandlerMap[type]
+        val actorMessageTypeHandler = onlineMsgTypeHandlerMap[type]
         if (actorMessageTypeHandler != null) {
             actorMessageTypeHandler.handle(sender, this, message)
             return
         }
-        onReceiveMessageWithoutAnyMatch(sender.getActorId(), message)
+        this.onReceiveMessageWithoutAnyMatch(sender.getActorId(), message)
     }
 
     @Nullable
@@ -167,15 +221,17 @@ protected constructor(
     }
 
     /**
-     * 当收到消息
+     * 当收到没有任何 Handler 处理的 message
      *
      * @param sender  发送人
      * @param message 消息
      */
-    abstract fun onReceiveMessageWithoutAnyMatch(
+    open fun onReceiveMessageWithoutAnyMatch(
         sender: String?,
-        message: Any?
-    )
+        message: Any?,
+    ) {
+
+    }
 
     /**
      * 消费所有消息
@@ -193,12 +249,12 @@ protected constructor(
                 if (message == null) {
                     break
                 }
-                handleMessageByPipeline(
+                executeOnlineMessageHandlerByPipeline(
                     message.sender,
                     message.message
                 )
             } catch (e: Throwable) {
-                log.error("handle message error. message = {}", JsonUtils233.toJsonString(message), e)
+                LOGGER.error("handle message error. message = {}", JsonUtils233.toJsonString(message), e)
             } finally {
                 switchExecuteToIdleState()
             }
@@ -214,17 +270,17 @@ protected constructor(
             // get msg from mailbox
             message = mailbox.poll(100, TimeUnit.MILLISECONDS)
             if (message == null) {
-                log.warn("空的调度. actorId = {}", actorId)
+                LOGGER.warn("空的调度. actorId = {}", actorId)
                 return
             }
 
             // handle
-            handleMessageByPipeline(
+            executeOnlineMessageHandlerByPipeline(
                 message.sender,
                 message.message
             )
         } catch (e: InterruptedException) {
-            log.error("handle message error. message = {}", JsonUtils233.toJsonString(message), e)
+            LOGGER.error("handle message error. message = {}", JsonUtils233.toJsonString(message), e)
         }
         switchExecuteToIdleState()
     }
@@ -236,7 +292,7 @@ protected constructor(
      */
     fun send(
         receiverActorId: String?,
-        message: Any?
+        message: Any?,
     ): Boolean {
         return actorSystem!!.sendMessageAsync(actorId, receiverActorId!!, message!!)
     }
@@ -250,7 +306,7 @@ protected constructor(
      */
     fun talkPredatory(
         receiverActorId: String?,
-        message: Any
+        message: Any,
     ): Boolean {
         return actorSystem!!.sendMessageSyncPredatory(receiverActorId!!, actorId, message)
     }
@@ -264,16 +320,10 @@ protected constructor(
      */
     fun talkOrderly(
         receiverActorId: String?,
-        message: Any
+        message: Any,
     ): Boolean {
         return actorSystem!!.sendMessageSyncOrderly(receiverActorId!!, actorId, message)
     }
-
-    val isInExecuteState: Boolean
-        /**
-         * @return 是否在执行中?
-         */
-        get() = isExecute.get()
 
     /**
      * @return 尝试设置 execute 状态
@@ -289,9 +339,164 @@ protected constructor(
         return isExecute.compareAndSet(true, false)
     }
 
-    fun shutdown() {
+    override fun shutdown() {
 
     }
+
+    /**
+     * 注册注解标注的方法
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun registerActorHandlerOnlineByAnnotation() {
+        val objClass = this.javaClass
+        val methods = objClass.declaredMethods
+
+        for (method in methods) {
+
+            registerActorMethodOnline(method)
+            registerActorMethodOffline(method)
+        }
+    }
+
+    private fun registerActorMethodOnline(method: Method) {
+        method.getAnnotation(ActorMethodOnline::class.java)
+            ?: return
+        // 找到标注了 @ActorHandler 的方法
+        val parameterTypes = method.parameterTypes
+
+        // 检查方法是否符合指定参数
+        if (parameterTypes.size != 2) {
+            LOGGER.error(
+                "@ActorMethodOnline 在线 ActorHandler 有问题, args size = 2. class={}, methodName={}",
+                this.javaClass,
+                method.name
+            )
+            return
+        }
+
+        val paramType1 = parameterTypes[0]
+        val paramType2 = parameterTypes[1]
+
+        if (paramType1 == Actor::class.java
+            && paramType2 == Actor::class.java
+        ) {
+            LOGGER.error(
+                "@ActorMethodOnline 在线 ActorHandler 有问题, 不可以都为 Actor 类型. class={}, methodName={}",
+                this.javaClass,
+                method.name
+            )
+            return
+        }
+
+        // 消息类型
+        var messageType: Class<Any>
+        if (paramType1 == Actor::class.java) {
+            messageType = paramType2 as Class<Any>
+        } else {
+            messageType = paramType1 as Class<Any>
+        }
+
+        // 前两个是 actor
+        val self = this
+        val handler = object : ActorOnlineMessageTypeHandler<Any> {
+            override fun handle(
+                sender: Actor,
+                receiver: Actor,
+                message: Any?,
+            ) {
+                method.invoke(self, sender, message)
+            }
+
+            override fun getType(): Class<Any> {
+                return messageType
+            }
+
+        }
+
+        this.registerOnlineMessageHandler(messageType, handler)
+    }
+
+    /**
+     * 注册离线消息
+     */
+    private fun registerActorMethodOffline(method: Method) {
+        method.getAnnotation(ActorMethodOffline::class.java)
+            ?: return
+        // 找到标注了 @ActorHandler 的方法
+        val parameterTypes = method.parameterTypes
+
+        // 检查方法是否符合指定参数
+        if (parameterTypes.size != 2) {
+            LOGGER.error(
+                "@ActorMethodOffline 有问题. class={}, methodName={}. 参考 methodName(toActorId: String, message: Event)",
+                this.javaClass,
+                method.name
+            )
+            return
+        }
+
+        val paramType1 = parameterTypes[0]
+        val paramType2 = parameterTypes[1]
+
+        if (paramType1 == String::class.java
+            && paramType2 == String::class.java
+        ) {
+            LOGGER.error(
+                "@ActorMethodOffline 离线 ActorHandler 不允许消息为 String. class={}, methodName={}",
+                this.javaClass,
+                method.name
+            )
+            return
+        }
+
+        // 消息类型
+        var messageType: Class<Any>
+        if (paramType1 == String::class.java) {
+            messageType = paramType2 as Class<Any>
+        } else {
+            messageType = paramType1 as Class<Any>
+        }
+        val messageIndex = parameterTypes.indexOf(messageType)
+
+        // 前两个是 actor
+        val self = this
+        val handler = object : ActorOfflineMessageHandler<Any> {
+
+            override fun handle(
+                fromActor: Actor,
+                toActorId: String,
+                message: Any,
+            ) {
+                if (messageIndex == 0) {
+                    method.invoke(self, message, toActorId)
+                } else {
+                    method.invoke(self, toActorId, message)
+                }
+            }
+
+        }
+
+        this.registerOfflineMessageHandler(messageType, handler)
+    }
+
+    /**
+     * 处理其他 Actor 的离线消息
+     */
+    @OnOtherActorThread
+    fun handleOfflineMessage(
+        toActorId: String,
+        message: Any,
+    ) {
+        val type: Class<*> = message.javaClass
+
+        // message type to handler
+        val offlineHandler = offlineMsgTypeHandlerMap[type]
+        if (offlineHandler == null) {
+            return
+        }
+        offlineHandler.handle(this, toActorId, message)
+    }
+
 
 }
 

@@ -1,4 +1,4 @@
-package com.neko233.data;
+package com.neko233.mock;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

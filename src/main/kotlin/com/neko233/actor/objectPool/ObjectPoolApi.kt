@@ -20,7 +20,6 @@ interface ObjectPoolApi<T> {
 
     fun recycle(obj: T): Boolean {
         if (obj == null) {
-            println("不能够回收 null 对象")
             return false
         }
 
