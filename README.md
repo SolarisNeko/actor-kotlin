@@ -33,7 +33,11 @@ and also provide 'thread' to handle actor message
 implementation("com.neko233:actor-kotlin:0.1.0")
 ```
 
-# Architecture
+# Architecture 架构
+
+## Core 关注点
+1. Actor online/offline 两种状态. 当 offline 时候也能处理.
+2. Actor all operator will through actor-system schedule.
 
 ## Struct
 
@@ -51,7 +55,7 @@ ActorSystem Lifecycle:
 
 # Code
 
-## Actor Class
+## Actor Class | 创建你的 Actor 类
 
 ```kotlin
 
@@ -91,37 +95,42 @@ class AnnotationActor(actorId: String) : Actor(actorId) {
 }
 ```
 
-## Start ActorSystem
+## 2、Run a ActorSystem quickly | 快速启动一个 Actor System
 
 ```kotlin
 
 @Test
 fun demo() {
-    val system = ActorApp233.run("demo")
-    
-    // here
-    val a1 = AnnotationActor("demo")
-    system.addActor(a1)
+    // create a Actor-System name of "demo"
+    val actorSystem = ActorApp233.run("demo")
+
+
+    // register actor
+    val actor1 = AnnotationActor("demo")
+    actorSystem.addActor(actor1)
 
     println()
 
-    // test
-    a1.send("demo", "demo")
-    a1.send("demo", "test-thread2")
+    // send to online actor (myself)
+    actor1.send("demo", "demo")
+    actor1.send("demo", "test-thread2")
 
 
-    a1.send(
+    // online-actor send to offline-actor
+    actor1.send(
         "demo233", OfflineMockData(
             name = "offline-thread1"
         )
     )
-    a1.send(
+    actor1.send(
         "demo233", OfflineMockData(
             name = "offline-thread2"
         )
     )
 
     println()
+
+}
 
 }
 ```

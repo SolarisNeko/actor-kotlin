@@ -15,26 +15,28 @@ class ActorWithAnnotationTest {
 
     @Test
     fun demo() {
-        val system = ActorApp233.run("demo")
+        // create a Actor-System name of "demo"
+        val actorSystem = ActorApp233.run("demo")
 
 
-        // here
-        val a1 = AnnotationActor("demo")
-        system.addActor(a1)
+        // register actor
+        val actor1 = AnnotationActor("demo")
+        actorSystem.addActor(actor1)
 
         println()
 
-        // test
-        a1.send("demo", "demo")
-        a1.send("demo", "test-thread2")
+        // send to online actor (myself)
+        actor1.send("demo", "demo")
+        actor1.send("demo", "test-thread2")
 
 
-        a1.send(
+        // online-actor send to offline-actor
+        actor1.send(
             "demo233", OfflineMockData(
                 name = "offline-thread1"
             )
         )
-        a1.send(
+        actor1.send(
             "demo233", OfflineMockData(
                 name = "offline-thread2"
             )
